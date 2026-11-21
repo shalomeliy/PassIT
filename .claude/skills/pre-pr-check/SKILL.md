@@ -10,8 +10,8 @@ Run every check that applies to the diff, in this order. Stop at the first failu
 ## 1. What changed
 
 ```bash
-git fetch origin main
-git diff --name-only origin/main...HEAD
+git fetch origin master
+git diff --name-only origin/master...HEAD
 ```
 
 ## 2. Checks
@@ -27,7 +27,7 @@ git diff --name-only origin/main...HEAD
 
 ## 3. Hygiene
 
-- No keys in the diff: `git diff origin/main...HEAD | grep -nE 'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|eyJhbGciOi'` must print nothing. `.env.local` and `google-key.txt` are gitignored; keep it that way.
+- No keys in the diff: `git diff origin/master...HEAD | grep -nE 'AIza[0-9A-Za-z_-]{20,}|sk-[A-Za-z0-9]{20,}|eyJhbGciOi'` must print nothing. `.env.local` and `google-key.txt` are gitignored; keep it that way.
 - A new env var? Run the `vercel-env-check` skill.
 - A new migration? It needs a matching `tests/db/<same-name>.test.sql` (see `new-migration`).
 - `dist/` is not committed.

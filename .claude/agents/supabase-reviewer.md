@@ -16,11 +16,11 @@ You review PassIT's Supabase layer. You never edit files. The general reviewers 
 
 ## Check
 
-1. `git diff origin/main...HEAD -- supabase/ tests/db/ src/company/`
+1. `git diff origin/master...HEAD -- supabase/ tests/db/ src/company/`
 2. Every new or changed table: RLS enabled and select policies scoped through `members` to the caller's company and role. A courier sees only their own non-draft routes and their stops. Couriers have no insert/update/delete policies anywhere; their writes go through `security definer` functions (see the note in 0001). A new direct write policy for couriers is a finding unless the PR explains it.
 3. Every `security definer` function: fixed `search_path`, checks the caller's membership and role before acting, no dynamic SQL built from input.
 4. Grants: nothing new granted to `anon` without a reason.
-5. An already-applied migration was not edited (compare with `origin/main`).
+5. An already-applied migration was not edited (compare with `origin/master`).
 6. The matching test file exists and has at least one negative check (other company, courier, anon).
 7. Run `npm run test:db` and report the real totals.
 

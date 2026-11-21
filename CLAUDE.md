@@ -49,7 +49,7 @@ When the user adds a skill or agent while `Project name` is `TEMPLATE`, it is a 
 - Verify command: `npm test && npm run build`, plus `npm run test:db` when `supabase/` changes (see the `pre-pr-check` skill).
 - Performance budget: **TBD**.
 - Product direction: `docs/ABOUT.md` and `docs/plans/`; otherwise ask the user and do not invent one.
-- Git repository: https://github.com/shalomeliy/PassIT. Changes go through pull requests to `main`.
+- Git repository: https://github.com/shalomeliy/PassIT. Changes go through pull requests to `master`.
 
 ## Project skills
 
