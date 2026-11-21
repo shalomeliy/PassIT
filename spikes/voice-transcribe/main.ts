@@ -67,9 +67,10 @@ function render() {
     ${result ? `
     <div class="card">
       <div class="row muted"><span>${esc(last?.mime ?? '')} · ${last ? Math.round(last.blob.size / 1024) : 0}KB · ${last ? (last.ms / 1000).toFixed(1) : 0} שנ'</span>
-        <span>תמלול ${(result.ms.transcribe / 1000).toFixed(1)} שנ' · Haiku ${(result.ms.clean / 1000).toFixed(1)} שנ'</span></div>
+        <span>תמלול ${(result.ms.transcribe / 1000).toFixed(1)} שנ' · Haiku ${(result.ms.clean / 1000).toFixed(1)} שנ' · מטמון ${result.cachedTokens ?? 0}</span></div>
       <h3>גולמי (OpenAI)</h3><pre>${esc(result.raw)}</pre>
       <h3>נקי (Haiku)</h3><pre>${result.clean == null ? `<span class="bad">נכשל: ${esc(result.cleanError ?? '')}</span>` : esc(result.clean)}</pre>
+      ${result.unknownCities?.length ? `<p class="bad">ערים ש-parser.js לא מכיר (ייקראו כרחוב): ${esc(result.unknownCities.join(', '))}</p>` : ''}
     </div>
     ${result.mode === 'stops' ? `
     <div class="card"><h3>parser.js על הטקסט הנקי</h3>${parsedTable(result.clean ?? result.raw)}</div>

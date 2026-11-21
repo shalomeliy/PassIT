@@ -2,7 +2,12 @@
 import type { Recording } from './recorder';
 
 export type TranscribeMode = 'stops' | 'reason';
-export interface TranscribeResult { mode: TranscribeMode; raw: string; clean: string | null; cleanError?: string; ms: { transcribe: number; clean: number } }
+export interface CleanAddress { street: string; number: string; city: string; extra: string }
+export interface TranscribeResult {
+  mode: TranscribeMode; raw: string; clean: string | null; cleanError?: string;
+  addresses?: CleanAddress[]; unknownCities?: string[]; cachedTokens?: number;
+  ms: { transcribe: number; clean: number };
+}
 
 export async function sendRecording(rec: Recording, mode: TranscribeMode, accessToken: string, fetchFn: typeof fetch = fetch): Promise<TranscribeResult> {
   let r: Response;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkUserLimits, extFor, handleTranscribe, tidyStops, CLEAN_MODEL, type TranscribeDeps } from '../api/_lib/transcribe';
+import { addressLines, checkUserLimits, extFor, handleTranscribe, unknownCities, CLEAN_MODEL, CLEAN_PROMPT, type TranscribeDeps } from '../api/_lib/transcribe';
 import { pickMime } from '../src/services/recorder';
 
 const SB = 'https://proj.supabase.co';
@@ -22,10 +22,11 @@ function fakeFetch(opts: { member?: boolean; tokenOk?: boolean; sttStatus?: numb
   return { fetch: fn as unknown as typeof fetch, calls, user };
 }
 
-function fakeHaiku(reply: string | Error, stop = 'end_turn') {
+// Haiku answers with JSON text, as structured outputs guarantee.
+function fakeHaiku(reply: object | Error, stop = 'end_turn', cached = 0) {
   const create = vi.fn(async (_p: unknown) => {
     if (reply instanceof Error) throw reply;
-    return { stop_reason: stop, content: [{ type: 'text', text: reply }] };
+    return { stop_reason: stop, content: [{ type: 'text', text: JSON.stringify(reply) }], usage: { cache_read_input_tokens: cached } };
   });
   return { anthropic: { messages: { create } } as unknown as TranscribeDeps['anthropic'], create };
 }
@@ -44,24 +45,29 @@ const deps = (f: ReturnType<typeof fakeFetch>, h?: ReturnType<typeof fakeHaiku>)
 describe('handleTranscribe', () => {
   it('transcribes, then cleans with Haiku into parser-ready lines', async () => {
     const f = fakeFetch();
-    const h = fakeHaiku('הרצל 8, רחובות\n');
+    const h = fakeHaiku({ addresses: [{ street: 'הרצל', number: '8', city: 'רחובות,', extra: '' }] }, 'end_turn', 900);
     const r = await handleTranscribe(req(), deps(f, h));
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(body.raw).toBe('הרצל חמש לא סליחה שמונה רחובות');
-    expect(body.clean).toBe('הרצל 8 רחובות');   // the comma Haiku slipped in is removed
+    expect(body.clean).toBe('הרצל 8 רחובות');   // a stray comma is removed
+    expect(body.cachedTokens).toBe(900);
+    expect(body.unknownCities).toEqual([]);
     const stt = f.calls.find((c) => c.url.includes('openai'))!;
     const form = stt.init!.body as FormData;
     expect(form.get('language')).toBe('he');
     expect((form.get('file') as File).name).toBe('recording.mp4');
-    const params = h.create.mock.calls[0][0] as { model: string; messages: { content: string }[] };
+    const params = h.create.mock.calls[0][0] as any;
     expect(params.model).toBe(CLEAN_MODEL);
     expect(params.messages[0].content).toBe(body.raw);
+    expect(params.output_config.format.type).toBe('json_schema');
+    expect(params.system[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(params.system[0].text).toBe(CLEAN_PROMPT.stops);   // fixed text, nothing per call, so the cache can hit
   });
 
   it('names a webm recording from Android with its own extension', async () => {
     const f = fakeFetch();
-    await handleTranscribe(req({ type: 'audio/webm;codecs=opus' }), deps(f, fakeHaiku('x 1')));
+    await handleTranscribe(req({ type: 'audio/webm;codecs=opus' }), deps(f, fakeHaiku({ addresses: [] })));
     const form = f.calls.find((c) => c.url.includes('openai'))!.init!.body as FormData;
     expect((form.get('file') as File).name).toBe('recording.webm');
   });
@@ -87,7 +93,7 @@ describe('handleTranscribe', () => {
 
   it('checks membership with the caller token, not a server key', async () => {
     const f = fakeFetch();
-    await handleTranscribe(req({ token: 'abc' }), deps(f, fakeHaiku('x 1')));
+    await handleTranscribe(req({ token: 'abc' }), deps(f, fakeHaiku({ addresses: [] })));
     const m = f.calls.find((c) => c.url.includes('/rest/v1/members'))!;
     expect((m.init!.headers as Record<string, string>).Authorization).toBe('Bearer abc');
     expect(m.url).toContain('active=eq.true');
@@ -103,7 +109,7 @@ describe('handleTranscribe', () => {
   });
 
   it('treats a Haiku refusal as a failed clean, not as text', async () => {
-    const body = await (await handleTranscribe(req(), deps(fakeFetch(), fakeHaiku('', 'refusal')))).json();
+    const body = await (await handleTranscribe(req(), deps(fakeFetch(), fakeHaiku({}, 'refusal')))).json();
     expect(body.clean).toBeNull();
   });
 
@@ -114,11 +120,13 @@ describe('handleTranscribe', () => {
   });
 
   it('cleans a failure reason into one sentence, with its own prompt', async () => {
-    const h = fakeHaiku('הלקוח לא היה בבית\nוהשכן לא ענה.');
+    const h = fakeHaiku({ reason: 'הלקוח לא היה בבית\nוהשכן לא ענה.' });
     const body = await (await handleTranscribe(req({ mode: 'reason' }), deps(fakeFetch({ text: 'אממ הלקוח לא היה בבית' }), h))).json();
     expect(body.mode).toBe('reason');
     expect(body.clean).toBe('הלקוח לא היה בבית והשכן לא ענה.');
-    expect((h.create.mock.calls[0][0] as { system: string }).system).toMatch(/failed/);
+    const params = h.create.mock.calls[0][0] as any;
+    expect(params.system[0].text).toBe(CLEAN_PROMPT.reason);
+    expect(params.output_config.format.schema.required).toEqual(['reason']);
   });
 
   it('rejects unknown audio types, empty and oversized recordings', async () => {
@@ -140,7 +148,7 @@ describe('handleTranscribe', () => {
   });
 
   it('returns an empty clean text for silence without calling Haiku', async () => {
-    const h = fakeHaiku('should not be used');
+    const h = fakeHaiku({ addresses: [] });
     const body = await (await handleTranscribe(req(), deps(fakeFetch({ text: '  ' }), h))).json();
     expect(body.clean).toBe('');
     expect(h.create).not.toHaveBeenCalled();
@@ -162,8 +170,23 @@ describe('limits and helpers', () => {
     expect(extFor('text/plain')).toBeNull();
   });
 
-  it('tidies Haiku output: no commas, bullets or blank lines', () => {
-    expect(tidyStops('1. הרצל 8, רחובות\n\n- ויצמן 14 ,פתח תקווה \n')).toBe('הרצל 8 רחובות\nויצמן 14 פתח תקווה');
+  it('joins structured addresses into lines with no commas or empty parts', () => {
+    expect(addressLines([
+      { street: 'הרצל', number: '8', city: 'רחובות', extra: '' },
+      { street: 'ויצמן', number: '14', city: '', extra: 'דירה 3, קומה 2' },
+      { street: '', number: '', city: '', extra: '' },
+    ])).toBe('הרצל 8 רחובות\nויצמן 14 דירה 3 קומה 2');
+  });
+
+  it('flags cities parser.js does not know', () => {
+    expect(unknownCities([{ street: 'הרצל', number: '8', city: 'גבעת שמואל', extra: '' }, { street: 'א', number: '1', city: 'רחובות', extra: '' }])).toEqual(['גבעת שמואל']);
+  });
+
+  it('treats JSON that does not parse as a failed clean, falling back to raw', async () => {
+    const create = vi.fn(async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: '{"addr' }] }));
+    const body = await (await handleTranscribe(req(), { ...deps(fakeFetch()), anthropic: { messages: { create } } as any })).json();
+    expect(body.clean).toBeNull();
+    expect(body.raw).toBeTruthy();
   });
 
   it('picks mp4 on iPhone Safari and webm on Android Chrome', () => {

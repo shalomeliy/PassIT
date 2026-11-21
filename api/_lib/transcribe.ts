@@ -21,6 +21,12 @@ export interface TranscribeOutput {
   /** null when Haiku failed or refused; the caller then uses raw. */
   clean: string | null;
   cleanError?: string;
+  /** Haiku's structured result in stops mode, kept for the full build. */
+  addresses?: CleanAddress[];
+  /** Cities that parser.js would not recognise in the lines. */
+  unknownCities?: string[];
+  /** Prompt tokens served from Anthropic's cache on this call (0 = cache miss or prompt too short). */
+  cachedTokens?: number;
   ms: { transcribe: number; clean: number };
 }
 
@@ -43,25 +49,88 @@ export const STT_PROMPT = {
   reason: 'שליח מסביר בקצרה למה משלוח לא נמסר: לא היה בבית, לא ענה, אין גישה, סירב, ביקש לתאם מחדש.',
 } as const;
 
+// The fixed instructions for Haiku. They never change between calls, so they are cached (see cleanText).
+// Examples of the hard cases are part of the prompt: they teach more than rules alone.
 export const CLEAN_PROMPT = {
-  stops: `You clean a Hebrew speech transcript of a courier reading delivery addresses in Israel.
-Return only the addresses, one per line, in the form: street number city
+  stops: `You clean a Hebrew speech transcript of a courier reading delivery addresses in Israel, and return them as structured data.
+
 Rules:
-- No commas anywhere. No numbering, bullets, quotes or any other text.
-- Remove filler words and greetings ("אממ", "יאללה", "אוקיי", "הבאה", "אחר כך").
-- Apply the courier's own corrections: "הרצל 5 לא סליחה 8" becomes "הרצל 8". "לא, בעצם" and "טעיתי" also replace what came right before.
-- Write numbers as digits: "חמש" -> 5, "שלוש עשרה" -> 13, "מאה עשרים" -> 120. A house letter stays attached: "17 א" -> 17א.
-- Keep apartment, floor, entrance and door code after the number with their Hebrew word: "דירה 4", "קומה 2", "כניסה ב", "קוד 1234".
-- Write the city only if the courier said it for that address. Never add or guess a city, street or number that was not said.
-- Keep street names exactly as heard, including streets named after cities ("שדרות ירושלים 12").
-- If no address was said, return an empty answer.`,
+- One entry per address, in the order spoken.
+- Remove filler words and greetings ("אממ", "יאללה", "אוקיי", "הבאה", "אחר כך", "תרשום").
+- Apply the courier's own corrections: "לא סליחה", "לא, בעצם", "טעיתי", "רגע" replace what came right before. A correction can replace the number, the street or the whole address.
+- number: digits only, plus a house letter if said ("17א"). Words become digits: "חמש" -> 5, "שלוש עשרה" -> 13, "מאה עשרים" -> 120.
+- street: the street name exactly as heard, without the words "רחוב" or "מספר". Streets named after cities stay streets ("שדרות ירושלים").
+- city: only if the courier said it for that address, written as in the city list below when it is one of them. Otherwise an empty string. Never guess a city.
+- extra: apartment, floor, entrance and door code with their Hebrew word and digits ("דירה 4 קומה 2", "כניסה ב", "קוד 1234"), or an empty string.
+- Never add an address, street, number or city that was not said. If no address was said, return an empty list.
+- No commas in any field.
+
+Known cities: ${CITY_NAMES}.
+
+Examples (transcript -> addresses):
+1. "הרצל חמש לא סליחה שמונה רחובות"
+   -> [{street:"הרצל", number:"8", city:"רחובות", extra:""}]
+2. "אממ ויצמן ארבע עשרה פתח תקווה אחר כך ביאליק שלוש"
+   -> [{street:"ויצמן", number:"14", city:"פתח תקווה", extra:""}, {street:"ביאליק", number:"3", city:"", extra:""}]
+3. "רוטשילד שבע עשרה א דירה ארבע קומה שתיים ראשון לציון"
+   -> [{street:"רוטשילד", number:"17א", city:"ראשון לציון", extra:"דירה 4 קומה 2"}]
+4. "שדרות ירושלים מאה עשרים בת ים, הנביאים 3 לא רגע זה הנשיא 3 חולון"
+   -> [{street:"שדרות ירושלים", number:"120", city:"בת ים", extra:""}, {street:"הנשיא", number:"3", city:"חולון", extra:""}]
+5. "רגע אני מחפש את הרשימה"
+   -> []`,
   reason: `You clean a short Hebrew speech transcript where a courier explains why a delivery failed.
 Return one short, clear Hebrew sentence for a manager's daily report.
 Rules:
 - Remove filler words, repetitions and self-corrections; keep the courier's meaning and every fact (names, times, numbers).
 - Add basic punctuation. No quotes, no prefix like "סיבה:", no explanation of what you changed.
-- Never add facts that were not said. If nothing meaningful was said, return an empty answer.`,
+- Never add facts that were not said. If nothing meaningful was said, return an empty string.
+
+Examples (transcript -> reason):
+1. "אממ הלקוח לא היה בבית, התקשרתי פעמיים והוא לא ענה" -> "הלקוח לא היה בבית. התקשרתי פעמיים ולא ענה."
+2. "השומר לא נתן להיכנס, לא, בעצם לא היה קוד לשער" -> "לא היה קוד לשער ולא הצלחתי להיכנס."
+3. "הלקוחה ביקשה ש ש שנביא מחר אחרי חמש" -> "הלקוחה ביקשה משלוח מחר אחרי 17:00."`,
 } as const;
+
+// Structured outputs: the API guarantees JSON in this shape, so nothing free-form reaches parser.js.
+const STOPS_SCHEMA = {
+  type: 'object',
+  properties: {
+    addresses: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { street: { type: 'string' }, number: { type: 'string' }, city: { type: 'string' }, extra: { type: 'string' } },
+        required: ['street', 'number', 'city', 'extra'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['addresses'],
+  additionalProperties: false,
+} as const;
+const REASON_SCHEMA = {
+  type: 'object',
+  properties: { reason: { type: 'string' } },
+  required: ['reason'],
+  additionalProperties: false,
+} as const;
+
+export interface CleanAddress { street: string; number: string; city: string; extra: string }
+
+const KNOWN_CITIES = new Set(CITIES.flat());
+const noCommas = (t: string) => String(t ?? '').replace(/[,،]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** One line per address, "street number city extra", the format parser.js reads best. */
+export function addressLines(list: CleanAddress[]): string {
+  return list
+    .map((a) => [a.street, a.number, a.city, a.extra].map(noCommas).filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Cities Haiku heard that cities.js does not know: parser.js would read them as a new street. */
+export const unknownCities = (list: CleanAddress[]) =>
+  [...new Set(list.map((a) => noCommas(a.city)).filter((c) => c && !KNOWN_CITIES.has(c)))];
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
@@ -118,28 +187,30 @@ export async function transcribeAudio(audio: ArrayBuffer, contentType: string, m
   return String(((await r.json()) as { text?: string }).text ?? '').trim();
 }
 
-/** Haiku's answer, made safe for parser.js: no commas, one trimmed address per line, no empty lines. */
-export function tidyStops(text: string): string {
-  return text.split('\n')
-    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(/[,،]/g, ' ').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n');
-}
+export interface CleanResult { text: string; addresses?: CleanAddress[]; cachedTokens: number }
 
-export async function cleanText(raw: string, mode: TranscribeMode, anthropic: Pick<Anthropic, 'messages'>): Promise<string> {
+export async function cleanText(raw: string, mode: TranscribeMode, anthropic: Pick<Anthropic, 'messages'>): Promise<CleanResult> {
   const msg = await anthropic.messages.create({
     model: CLEAN_MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     // A short rewrite: no thinking and low effort keep the courier's wait short.
     thinking: { type: 'disabled' },
-    output_config: { effort: 'low' },
-    system: CLEAN_PROMPT[mode],
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: mode === 'stops' ? STOPS_SCHEMA : REASON_SCHEMA } },
+    // The instructions are the same on every call, so they are cached for 5 minutes. Only the transcript is new.
+    system: [{ type: 'text', text: CLEAN_PROMPT[mode], cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: raw }],
   });
   if (msg.stop_reason === 'refusal') throw new Error('refusal');
-  const text = msg.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim();
-  return mode === 'stops' ? tidyStops(text) : text.replace(/\s+/g, ' ');
+  if (msg.stop_reason === 'max_tokens') throw new Error('התשובה נקטעה');
+  const json = msg.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+  const data = JSON.parse(json) as { addresses?: CleanAddress[]; reason?: string };
+  const cachedTokens = msg.usage?.cache_read_input_tokens ?? 0;
+  if (mode === 'reason') return { text: oneLine(data.reason ?? ''), cachedTokens };
+  const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+  return { text: addressLines(addresses), addresses, cachedTokens };
 }
+
+const oneLine = (t: string) => String(t).replace(/\s+/g, ' ').trim();
 
 export async function handleTranscribe(request: Request, d: TranscribeDeps): Promise<Response> {
   try {
@@ -163,7 +234,12 @@ export async function handleTranscribe(request: Request, d: TranscribeDeps): Pro
     if (!raw) { out.clean = ''; return json(200, out); }
     if (!d.anthropic) out.cleanError = 'חסר ANTHROPIC_API_KEY';
     else {
-      try { out.clean = await cleanText(raw, mode, d.anthropic); }
+      try {
+        const c = await cleanText(raw, mode, d.anthropic);
+        out.clean = c.text;
+        out.cachedTokens = c.cachedTokens;
+        if (c.addresses) { out.addresses = c.addresses; out.unknownCities = unknownCities(c.addresses); }
+      }
       catch (e) { out.cleanError = (e as Error).message || 'הניקוי נכשל'; }
     }
     out.ms.clean = Date.now() - t1;
