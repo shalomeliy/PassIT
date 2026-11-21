@@ -43,13 +43,26 @@ When the user adds a skill or agent while `Project name` is `TEMPLATE`, it is a 
 
 ## Project facts
 
-- Project name: `TEMPLATE`
-- Project type: **TBD** (website, app, API, script...). Website-specific skills apply only when this is a website.
-- Stack: **TBD** (no site code yet). Fill in when the first code lands.
-- Verify command: **TBD**. Until it exists, `loop-engineering` uses the narrowest real check available and says which one it ran.
-- Performance budget: **TBD** (set by `new-project-setup` for websites; see `docs/TEMPLATE-ROADMAP.md`).
-- Product direction: `docs/PRODUCT-DIRECTION.md` if present; otherwise ask the user and do not invent one.
-- Not a git repository yet. Skills that commit or open PRs stop at the local change.
+- Project name: `PassIT`
+- Project type: website (installable PWA): solo courier route planner at `/`, company mode with an admin app at `/admin` and a courier app at `/c`.
+- Stack: React 19 + TypeScript + Vite PWA, Vercel serverless functions in `api/`, Supabase (company mode), Google Maps / Geocoding / Routes.
+- Verify command: `npm test && npm run build`, plus `npm run test:db` when `supabase/` changes (see the `pre-pr-check` skill).
+- Performance budget: **TBD**.
+- Product direction: `docs/ABOUT.md` and `docs/plans/`; otherwise ask the user and do not invent one.
+- Git repository: https://github.com/shalomeliy/PassIT. Changes go through pull requests to `master`.
+
+## Project skills
+
+Skills and agents that fit only PassIT. They live in `.claude/skills/` and `.claude/agents/` next to the base set.
+
+| Situation | Use |
+|---|---|
+| Before opening or updating a PR | `pre-pr-check` skill |
+| New or changed env var, or Vercel behaves differently from local | `vercel-env-check` skill |
+| A Hebrew dictation was parsed wrong, or a new real transcript arrived | `add-parser-case` skill, with the `parser-specialist` agent to find the cause |
+| A change needs a Supabase schema change | `new-migration` skill, then the `supabase-reviewer` agent |
+
+Agents `parser-specialist` and `supabase-reviewer` are read-only, like the base agents.
 
 ## Where outputs go
 
