@@ -99,12 +99,19 @@ export function routeOrigin(plan: Plan): LatLng | undefined {
   return last?.location ?? plan.start.location;
 }
 
-/** Stops in driving order when the plan is optimized, otherwise in the order added. */
+/**
+ * Stops in driving order when the plan is optimized, otherwise in the order added.
+ * A re-sort routes only the stops still to do. The stops handled before it are not part of that order and
+ * come first, in the order they were handled: they are behind the courier. Putting them after the route
+ * numbered them as if they were still ahead, so the map showed a path jumping across town.
+ */
 export function orderedStops(plan: Plan): Stop[] {
   if (!plan.optimized) return plan.stops;
   const byId = new Map(plan.stops.map((s) => [s.id, s]));
   const seen = new Set(plan.optimized.order);
-  return [...plan.optimized.order.map((id) => byId.get(id)).filter((s): s is Stop => !!s), ...plan.stops.filter((s) => !seen.has(s.id))];
+  const off = plan.stops.filter((s) => !seen.has(s.id));
+  const behind = off.filter((s) => s.delivery !== 'todo').sort((a, b) => (a.handledAt ?? 0) - (b.handledAt ?? 0));
+  return [...behind, ...plan.optimized.order.map((id) => byId.get(id)).filter((s): s is Stop => !!s), ...off.filter((s) => s.delivery === 'todo')];
 }
 
 /** "HH:MM" today as epoch ms, in the phone's own time zone. */

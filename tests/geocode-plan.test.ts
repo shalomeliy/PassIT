@@ -54,6 +54,18 @@ describe('plan', () => {
     const plan = { ...base, optimized: { order: [b.id, a.id], legs: [], totalDurationSec: 0, totalDistanceM: 0, at: 0 } };
     expect(orderedStops(plan).map((s) => s.id)).toEqual([b.id, a.id]);
   });
+  it('after a re-sort puts the stops already handled first, in the order handled, not after the new route', () => {
+    const base = addStops(emptyPlan(), stopsFromText('הרצל 1 יבנה, הרצל 2 יבנה, הרצל 3 יבנה, הרצל 4 יבנה, הרצל 5 יבנה', null)).plan;
+    const [a, b, c, d, e] = base.stops;
+    // a and c were handled (c first), then the courier re-sorted what was left: e, b, d.
+    const stops = base.stops.map((s) => (s === a ? { ...s, delivery: 'delivered' as const, handledAt: 2000 }
+      : s === c ? { ...s, delivery: 'failed' as const, handledAt: 1000 } : s));
+    const plan = { ...base, stops, optimized: { order: [e.id, b.id, d.id], legs: [], totalDurationSec: 0, totalDistanceM: 0, at: 3000 } };
+    expect(orderedStops(plan).map((s) => s.id)).toEqual([c.id, a.id, e.id, b.id, d.id]);
+    // A stop undone after the re-sort is not in the route; it waits at the end for the next re-sort.
+    const undone = { ...plan, stops: plan.stops.map((s) => (s.id === a.id ? { ...s, delivery: 'todo' as const, handledAt: undefined } : s)) };
+    expect(orderedStops(undone).map((s) => s.id)).toEqual([c.id, e.id, b.id, d.id, a.id]);
+  });
   it('skips addresses already in the list, including a repeat in the same dictation', () => {
     const first = addStops(emptyPlan(), stopsFromText('הרצל 3 יבנה, דוכיפת 5 יבנה', null));
     const again = addStops(first.plan, stopsFromText('הרצל 3 יבנה, דוכיפת 5 יבנה, הרצל 3 יבנה, התורן 7 יבנה', null));
