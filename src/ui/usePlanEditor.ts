@@ -96,7 +96,7 @@ export function usePlanEditor(storage: PlanStorage, optimizeOptions?: () => Opti
       if (r.ok && r.address && !(mem && isFresh(mem))) remember(input, { address: r.address, location: r.location });
       const place: Place = { input, address: r.address, location: r.location };
       logInfo('place_set', { which, input, address: r.address });
-      setPlan((p) => (which === 'start' ? { ...p, start: place, optimized: undefined } : { ...p, end: place, optimized: undefined }));
+      setPlan((p) => (which === 'start' ? { ...p, start: place, optimized: undefined, resortFrom: undefined } : { ...p, end: place, optimized: undefined }));
     } catch (e) { setError((e as Error).message); }
   };
 
@@ -106,7 +106,7 @@ export function usePlanEditor(storage: PlanStorage, optimizeOptions?: () => Opti
     navigator.geolocation.getCurrentPosition(async (pos) => {
       const location = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       const address = await reverseGeocode(location).catch(() => undefined);
-      setPlan((p) => ({ ...p, start: { input: address ?? 'המיקום שלי', address: address ?? 'המיקום שלי', location }, optimized: undefined }));
+      setPlan((p) => ({ ...p, start: { input: address ?? 'המיקום שלי', address: address ?? 'המיקום שלי', location }, optimized: undefined, resortFrom: undefined }));
       resolve();
     }, (err) => { setError(err.code === 1 ? 'אין הרשאה למיקום. אשר גישה בדפדפן' : 'לא הצלחתי לאתר מיקום'); resolve(); }, { enableHighAccuracy: true, timeout: 15000 });
   });
