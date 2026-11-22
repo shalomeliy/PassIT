@@ -73,6 +73,12 @@ export interface Plan {
   startedAt?: number;
   /** When this copy was saved on the phone, to pick the newer of the two saved copies after a reload. */
   savedAt?: number;
+  /**
+   * The point the courier picked in the last "סדר מחדש" sheet, and when. Adding a stop clears the sorted route,
+   * and the plain "סדר מסלול" after it must still start there (or at a stop handled since) and return there,
+   * not jump back to the morning's start.
+   */
+  resortFrom?: { point: LatLng; at: number };
 }
 
 export const MAX_STOPS = 25;

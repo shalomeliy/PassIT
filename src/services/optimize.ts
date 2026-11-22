@@ -1,4 +1,4 @@
-import { dueEpoch, endModeOf, routeOrigin } from '../domain/plan';
+import { dueEpoch, endModeOf, routeHome, routeOrigin } from '../domain/plan';
 import type { LatLng, Optimized, Plan } from '../domain/types';
 import { logError, logInfo } from './log';
 import { getVehicle } from './vehicle';
@@ -14,14 +14,14 @@ export async function optimizePlan(plan: Plan, signal?: AbortSignal, opts: Optim
   const stops = plan.stops.filter((s) => s.delivery === 'todo' && s.location);
   const from = opts.from;
   const origin = from ?? routeOrigin(plan);
-  const home = from ?? plan.start.location;
+  const home = from ?? routeHome(plan);
   if (!home || !origin) throw new Error('חסרה נקודת יציאה מאומתת');
   const t0 = Date.now();
   const started = opts.departAt ?? t0;
   const due = opts.dueAt ?? ((hhmm: string) => dueEpoch(hhmm, started));
   const timed = stops.filter((s) => s.dueAt).length;
   const vehicle = opts.vehicle ?? getVehicle();
-  logInfo('optimize_request', { vehicle, stops: stops.length, pinned: stops.filter((s) => s.order !== 'auto').length, timed, endMode: endModeOf(plan), from: from ? 'picked' : 'default' });
+  logInfo('optimize_request', { vehicle, stops: stops.length, pinned: stops.filter((s) => s.order !== 'auto').length, timed, endMode: endModeOf(plan), from: from ? 'picked' : plan.resortFrom ? 'kept' : 'default' });
   const res = await fetch('/api/optimize', {
     method: 'POST', signal,
     headers: { 'Content-Type': 'application/json' },
@@ -47,5 +47,6 @@ export async function optimizePlan(plan: Plan, signal?: AbortSignal, opts: Optim
     throw new Error(data.error ?? `שגיאת שרת ${res.status}`);
   }
   logInfo('optimize_ok', { picked: data.picked, ms: Date.now() - t0, totalDurationSec: data.totalDurationSec, totalDistanceM: data.totalDistanceM, order: data.order, deadlines: data.deadlines });
-  return { ...(data as unknown as Omit<Optimized, 'at'>), at: Date.now(), ...(from ? { from } : {}) };
+  const picked = from ?? plan.resortFrom?.point;
+  return { ...(data as unknown as Omit<Optimized, 'at'>), at: Date.now(), ...(picked ? { from: picked } : {}) };
 }

@@ -93,11 +93,15 @@ export function canOptimize(plan: Plan): { ok: boolean; why?: string } {
  * Before any delivery it is the start point.
  */
 export function routeOrigin(plan: Plan): LatLng | undefined {
+  const since = plan.resortFrom?.at ?? 0;
   const last = plan.stops
-    .filter((s) => s.delivery !== 'todo' && s.handledAt && s.location)
+    .filter((s) => s.delivery !== 'todo' && s.handledAt && s.handledAt > since && s.location)
     .sort((a, b) => b.handledAt! - a.handledAt!)[0];
-  return last?.location ?? plan.start.location;
+  return last?.location ?? plan.resortFrom?.point ?? plan.start.location;
 }
+
+/** Where a route without an end address comes back to: the point picked in the last re-sort, else the start. */
+export const routeHome = (plan: Plan): LatLng | undefined => plan.resortFrom?.point ?? plan.start.location;
 
 /**
  * Stops in driving order when the plan is optimized, otherwise in the order added.

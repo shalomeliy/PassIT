@@ -56,7 +56,7 @@ export default function App() {
       const current = { ...(planRef.current ?? plan), end };
       logInfo('resort', { end: end?.address ?? null });
       const optimized = await optimizePlan(current, undefined, { from });
-      setPlan((p) => ({ ...p, end, optimized }));
+      setPlan((p) => ({ ...p, end, optimized, resortFrom: { point: from, at: Date.now() } }));
       setResorting(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally { setOptimizing(false); }

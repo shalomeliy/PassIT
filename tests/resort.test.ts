@@ -46,3 +46,29 @@ describe('re-sort from a picked point', () => {
     expect(opt.from).toBeUndefined();
   });
 });
+
+describe('sorting again after adding a stop to a re-sorted route', () => {
+  it('keeps the point picked in the re-sort instead of going back to the morning start', async () => {
+    const bodies = captureFetch();
+    // Re-sorted from HERE at t=10; stop a was handled before that (handledAt 1), so it is not where the courier is.
+    const opt = await optimizePlan({ ...plan(), resortFrom: { point: HERE, at: 10 } });
+    expect(bodies[0].origin).toEqual(HERE);
+    expect(bodies[0].destination).toEqual(HERE);
+    expect(opt.from).toEqual(HERE);
+  });
+
+  it('starts at a stop handled after the re-sort, still returning to the picked point', async () => {
+    const bodies = captureFetch();
+    const p = plan();
+    p.stops[1] = { ...p.stops[1], delivery: 'delivered', handledAt: 20 };
+    await optimizePlan({ ...p, resortFrom: { point: HERE, at: 10 } });
+    expect(bodies[0].origin).toEqual({ lat: 31.91, lng: 34.77 });
+    expect(bodies[0].destination).toEqual(HERE);
+  });
+
+  it('an end address still wins over the picked point', async () => {
+    const bodies = captureFetch();
+    await optimizePlan({ ...plan({ input: 'סוף', location: END }), resortFrom: { point: HERE, at: 10 } });
+    expect(bodies[0].destination).toEqual(END);
+  });
+});
