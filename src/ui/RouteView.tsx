@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { earnings, fmtShekel } from '../domain/history';
 import { endModeOf, fmtClock, fmtDuration, fmtKm, orderedStops } from '../domain/plan';
 import type { Plan, Stop } from '../domain/types';
@@ -34,6 +34,14 @@ export function RouteView({ plan, onDelivery, onReoptimize, onRemove, onEdit, on
   const routed = new Set(opt.order);
   const kept = new Set(plan.stops.map((s) => s.id));
   const stale = opt.stale || opt.order.some((id) => !kept.has(id));
+  // Handled stops come first in the list, so mid-day the next stop is below them. Bring it into view on open
+  // and every time it changes (a stop was marked). Before the first mark the top of the route stays in view.
+  const nextId = stops.find((s) => s.delivery === 'todo')?.id;
+  useEffect(() => {
+    if (!nextId || !stops.some((s) => s.delivery !== 'todo')) return;
+    document.getElementById(`stop-${nextId}`)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextId]);
   const [editing, setEditing] = useState<{ id: string; text: string; error: string; busy: boolean } | null>(null);
   const saveEdit = async () => {
     if (!editing?.text.trim()) return;
@@ -78,7 +86,7 @@ export function RouteView({ plan, onDelivery, onReoptimize, onRemove, onEdit, on
         {stops.map((s, i) => {
           const leg = routed.has(s.id) ? opt.legs[opt.order.indexOf(s.id)] : undefined;
           return (
-            <li key={s.id} className={s.delivery}>
+            <li key={s.id} id={`stop-${s.id}`} className={s.delivery}>
               <div className="num">{i + 1}</div>
               <div className="grow">
                 {editing?.id === s.id ? (
